@@ -123,12 +123,14 @@ export default function MCDARankingTab({ trains }: MCDARankingTabProps) {
       {/* MCDA Formula Card */}
       <div className="bg-gradient-to-r from-blue-50 to-green-50 rounded-lg p-6 border border-blue-200">
         <h3 className="text-lg font-semibold text-gray-900 mb-3">MCDA Scoring Formula</h3>
-        <div className="bg-white rounded-lg p-4 font-mono text-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 font-mono text-sm border">
           <div className="text-blue-600 font-medium">
-            MCDA Score = (0.3 × Risk Score) + (0.3 × Cleanliness Score) + (0.4 × Mileage/1000)
+            MCDA Score = (0.3 × Normalized_Cleanliness) + (0.4 × Inverted_Mileage) + (0.3 × Inverted_Risk)
           </div>
-          <div className="mt-2 text-gray-600 text-xs">
-            Higher scores indicate better overall performance considering risk management, cleanliness standards, and operational experience.
+          <div className="mt-3 text-gray-600 dark:text-gray-400 text-xs space-y-1">
+            <div>• All inputs normalized to 0-100 scale for fair comparison</div>
+            <div>• Higher mileage and risk scores are inverted (lower is better)</div>
+            <div>• Final score: Higher = Better overall asset performance</div>
           </div>
         </div>
       </div>

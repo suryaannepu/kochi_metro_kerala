@@ -9,29 +9,85 @@ const TRAIN_NAMES = [
 
 const JOB_CARD_STATUSES: JobCardStatus[] = ['Open', 'Pending', 'Appointed', 'Verified', 'Closed'];
 
+// Fleet-wide constants for normalization
+const FLEET_STATS = {
+  MIN_MILEAGE: 5000,
+  MAX_MILEAGE: 200000,
+  MIN_CLEANLINESS: 1,
+  MAX_CLEANLINESS: 5,
+  AVERAGE_AGE_YEARS: 8
+};
+
 function randomDate(start: Date, end: Date): Date {
   return new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
 }
 
-function calculateRiskLevel(expiryDate: Date, jobCardStatus: JobCardStatus): { level: RiskLevel; score: number } {
+function calculateDynamicRiskScore(
+  expiryDate: Date, 
+  jobCardStatus: JobCardStatus, 
+  mileage: number, 
+  issueDate: Date,
+  lastInspectionDate: Date
+): number {
   const now = new Date();
   const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 3600 * 24));
-  const isExpired = daysUntilExpiry <= 0;
-  const isHighRiskStatus = jobCardStatus === 'Open' || jobCardStatus === 'Pending';
-
-  if (isExpired || (daysUntilExpiry <= 3 && isHighRiskStatus)) {
-    return { level: 'Critical', score: 100 };
-  } else if (daysUntilExpiry <= 3 || (daysUntilExpiry <= 7 && isHighRiskStatus)) {
-    return { level: 'High', score: 75 };
-  } else if (daysUntilExpiry <= 7 || isHighRiskStatus) {
-    return { level: 'Medium', score: 50 };
-  } else {
-    return { level: 'Low', score: 25 };
+  const ageInYears = (now.getTime() - issueDate.getTime()) / (1000 * 3600 * 24 * 365);
+  const daysSinceInspection = Math.ceil((now.getTime() - lastInspectionDate.getTime()) / (1000 * 3600 * 24));
+  
+  let riskScore = 0;
+  
+  // Certificate expiry risk (0-40 points)
+  if (daysUntilExpiry <= 0) {
+    riskScore += 40; // Expired
+  } else if (daysUntilExpiry <= 7) {
+    riskScore += 30; // Expiring soon
+  } else if (daysUntilExpiry <= 30) {
+    riskScore += 15; // Expiring this month
   }
+  
+  // Job card status risk (0-25 points)
+  const jobCardRisk = {
+    'Open': 25,
+    'Pending': 20,
+    'Appointed': 10,
+    'Verified': 5,
+    'Closed': 0
+  };
+  riskScore += jobCardRisk[jobCardStatus];
+  
+  // Mileage risk (0-20 points) - higher mileage = higher risk
+  const mileageRatio = (mileage - FLEET_STATS.MIN_MILEAGE) / (FLEET_STATS.MAX_MILEAGE - FLEET_STATS.MIN_MILEAGE);
+  riskScore += Math.min(20, mileageRatio * 20);
+  
+  // Age risk (0-10 points)
+  const ageRatio = ageInYears / (FLEET_STATS.AVERAGE_AGE_YEARS * 2);
+  riskScore += Math.min(10, ageRatio * 10);
+  
+  // Inspection delay risk (0-5 points)
+  if (daysSinceInspection > 90) {
+    riskScore += 5;
+  } else if (daysSinceInspection > 60) {
+    riskScore += 3;
+  }
+  
+  return Math.min(100, Math.max(0, riskScore));
+}
+
+function getRiskLevel(riskScore: number): RiskLevel {
+  if (riskScore >= 76) return 'Critical';
+  if (riskScore >= 51) return 'High';
+  if (riskScore >= 21) return 'Medium';
+  return 'Low';
 }
 
 function calculateMCDA(riskScore: number, cleanlinessScore: number, mileage: number): number {
-  return 0.3 * riskScore + 0.3 * cleanlinessScore + 0.4 * (mileage / 1000);
+  // Normalize all inputs to 0-100 scale
+  const normalizedCleanliness = ((cleanlinessScore - 40) / (100 - 40)) * 100; // 40-100 -> 0-100
+  const normalizedMileage = 100 - Math.min(((mileage - FLEET_STATS.MIN_MILEAGE) / (FLEET_STATS.MAX_MILEAGE - FLEET_STATS.MIN_MILEAGE)) * 100, 100); // Invert: higher mileage = lower score
+  const normalizedRisk = 100 - riskScore; // Invert: higher risk = lower score
+  
+  // Calculate weighted MCDA score
+  return (0.3 * normalizedCleanliness) + (0.4 * normalizedMileage) + (0.3 * normalizedRisk);
 }
 
 function calculateBayPriority(train: Train): number {
@@ -62,10 +118,11 @@ export function generateTrainData(): Train[] {
     
     const jobCardStatus = JOB_CARD_STATUSES[Math.floor(Math.random() * JOB_CARD_STATUSES.length)];
     const cleanlinessScore = Math.floor(Math.random() * 61) + 40; // 40-100
-    const mileage = Math.floor(Math.random() * 90001) + 10000; // 10,000-100,000
+    const mileage = Math.floor(Math.random() * (FLEET_STATS.MAX_MILEAGE - FLEET_STATS.MIN_MILEAGE + 1)) + FLEET_STATS.MIN_MILEAGE; // 5,000-200,000
     const dailyCrowdCount = Math.floor(Math.random() * 4501) + 500; // 500-5000
     
-    const { level: riskLevel, score: riskScore } = calculateRiskLevel(expiryDate, jobCardStatus);
+    const riskScore = calculateDynamicRiskScore(expiryDate, jobCardStatus, mileage, issueDate, lastInspectionDate);
+    const riskLevel = getRiskLevel(riskScore);
     const mcdaScore = calculateMCDA(riskScore, cleanlinessScore, mileage);
     
     const train: Train = {
